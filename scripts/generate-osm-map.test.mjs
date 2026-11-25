@@ -8,11 +8,10 @@ const fixture = `<?xml version="1.0"?>
   <node id="2" lat="43.2957" lon="5.3730"/>
   <node id="3" lat="43.2959" lon="5.3730"/>
   <node id="4" lat="43.2959" lon="5.3728"/>
-  <node id="5" lat="43.2957" lon="5.3728"/>
   <node id="6" lat="43.2957" lon="5.3750"/>
   <node id="7" lat="43.2962" lon="5.3728"/>
   <way id="10">
-    <nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="5"/>
+    <nd ref="1"/><nd ref="2"/><nd ref="3"/><nd ref="4"/><nd ref="1"/>
     <tag k="building" v="apartments"/><tag k="building:levels" v="4"/>
   </way>
   <way id="11">
@@ -28,10 +27,11 @@ const fixture = `<?xml version="1.0"?>
 
 test("parses OSM way tags, node references and XML entities", () => {
   const parsed = parseOsmXml(fixture);
-  assert.equal(parsed.nodes.size, 7);
+  assert.equal(parsed.nodes.size, 6);
+  assert.equal(parsed.ways[0].tags.building, "apartments");
   assert.equal(parsed.ways[1].tags.name, "Rue de l'Exemple");
   assert.equal(parsed.relations[0].members[0].ref, "12");
-  assert.deepEqual(parsed.ways[0].refs, ["1", "2", "3", "4", "5"]);
+  assert.deepEqual(parsed.ways[0].refs, ["1", "2", "3", "4", "1"]);
 });
 
 test("converts geographic features to metre-scale roads and building footprints", () => {

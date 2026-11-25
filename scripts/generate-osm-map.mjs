@@ -260,6 +260,7 @@ export function buildMap(osmXml, { bbox = OLD_PORT_BBOX, origin = OLD_PORT_ORIGI
   const buildings = [];
   const waters = [];
   const wayById = new Map(ways.map((way) => [way.id, way]));
+  let closedBuildingWays = 0;
 
   for (const way of ways) {
     const points = way.refs.map((ref) => nodes.get(ref)).filter(Boolean).map((node) => project(node, origin));
@@ -282,6 +283,7 @@ export function buildMap(osmXml, { bbox = OLD_PORT_BBOX, origin = OLD_PORT_ORIGI
     }
 
     const isBuilding = way.tags.building && way.refs[0] === way.refs.at(-1);
+    if (isBuilding) closedBuildingWays++;
     const isWater = (way.tags.natural === "water" || way.tags.water || way.tags.waterway === "riverbank")
       && way.refs[0] === way.refs.at(-1);
     if (isBuilding || isWater) {
@@ -330,7 +332,7 @@ export function buildMap(osmXml, { bbox = OLD_PORT_BBOX, origin = OLD_PORT_ORIGI
   }
 
   if (!roads.length || !buildings.length) {
-    throw new Error(`L'extrait OSM est incomplet (routes: ${roads.length}, batiments: ${buildings.length}).`);
+    throw new Error(`L'extrait OSM est incomplet (routes: ${roads.length}, empreintes: ${buildings.length}, batiments fermes: ${closedBuildingWays}).`);
   }
   const spawn = nearestOnRoad([-260, -40], roads);
   if (!spawn) throw new Error("Aucune route OSM ne permet de placer le point de depart.");
