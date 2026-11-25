@@ -441,7 +441,7 @@ function buildUi(container: HTMLElement) {
     </section>
     <aside class="right-stack">
       <div class="minimap-wrap"><canvas class="minimap" id="minimap" width="300" height="210" aria-label="Mini-carte du quartier"></canvas><div class="mini-label">PORT &amp; QUARTIER</div></div>
-      <div class="panel controls-card"><kbd>ZQSD</kbd> / <kbd>WASD</kbd> bouger · <kbd>Shift</kbd> sprinter<br><kbd>Souris</kbd> glissee tourner · <kbd>Espace</kbd> sauter<br><kbd>E</kbd> / clic impulsion arcade</div>
+      <div class="panel controls-card"><kbd>ZQSD</kbd> / <kbd>WASD</kbd> / <kbd>↑↓←→</kbd> bouger · <kbd>Shift</kbd> sprinter<br><kbd>Souris</kbd> glissee tourner · <kbd>Espace</kbd> sauter<br><kbd>E</kbd> / clic impulsion arcade</div>
     </aside>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <footer class="bottom-bar">
@@ -596,7 +596,7 @@ function setModal(mode: "intro" | "pause" | null): void {
     ui.modalKicker.textContent = "Carte OpenStreetMap · zone test";
     ui.modalTitle.innerHTML = "MARSEILLE <span>BB</span>";
     ui.modalCopy.textContent = "Explore les rues et les empreintes de batiments du Vieux-Port, converties depuis OpenStreetMap. Fais rebondir les accessoires fictifs, enchaine les combos et seme les voitures de patrouille-jouets.";
-    ui.modalMeta.innerHTML = "<kbd>ZQSD</kbd>/<kbd>WASD</kbd> bouger · <kbd>Shift</kbd> sprinter · <kbd>Espace</kbd> sauter<br><kbd>E</kbd> ou clic gauche pres d'un accessoire pour le faire rebondir.";
+    ui.modalMeta.innerHTML = "<kbd>ZQSD</kbd>/<kbd>WASD</kbd>/<kbd>↑↓←→</kbd> bouger · <kbd>Shift</kbd> sprinter · <kbd>Espace</kbd> sauter<br><kbd>E</kbd> ou clic gauche pres d'un accessoire pour le faire rebondir.";
     ui.modalAction.textContent = "Entrer dans le quartier";
   } else if (mode === "pause") {
     ui.modalKicker.textContent = "La partie est en pause";
@@ -715,8 +715,10 @@ function collides(x: number, z: number, radius: number): boolean {
 }
 
 function updatePlayer(delta: number): void {
-  const forward = Number(keys.has("KeyW") || keys.has("KeyZ")) - Number(keys.has("KeyS"));
-  const sideways = Number(keys.has("KeyD")) - Number(keys.has("KeyA") || keys.has("KeyQ"));
+  const forward = Number(keys.has("KeyW") || keys.has("KeyZ") || keys.has("ArrowUp"))
+    - Number(keys.has("KeyS") || keys.has("ArrowDown"));
+  const sideways = Number(keys.has("KeyD") || keys.has("ArrowRight"))
+    - Number(keys.has("KeyA") || keys.has("KeyQ") || keys.has("ArrowLeft"));
   const input = new THREE.Vector2(sideways, forward);
   if (input.lengthSq() > 0) {
     input.normalize();
