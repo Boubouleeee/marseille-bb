@@ -9,7 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "prebuild": "npm run map:generate",
     "preview": "vite preview",
-    "test": "vitest run && node --test scripts/generate-osm-map.test.mjs",
+    "test": "vitest run src && node --test scripts/generate-osm-map.test.mjs",
     "map:generate": "node scripts/generate-osm-map.mjs",
     "map:update": "node scripts/generate-osm-map.mjs --update"
   },
