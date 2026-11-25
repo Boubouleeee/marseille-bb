@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "predev": "npm run map:generate",
     "build": "tsc --noEmit && vite build",
+    "prebuild": "npm run map:generate",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run && node --test scripts/generate-osm-map.test.mjs",
+    "map:generate": "node scripts/generate-osm-map.mjs",
+    "map:update": "node scripts/generate-osm-map.mjs --update"
   },
   "dependencies": {
     "three": "^0.179.1"

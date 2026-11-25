@@ -320,6 +320,12 @@ kbd {
   gap: 12px;
 }
 
+.location-stack {
+  display: grid;
+  justify-items: start;
+  gap: 5px;
+}
+
 .district-tag {
   padding: 9px 12px;
   border: 1px solid var(--line);
@@ -330,6 +336,14 @@ kbd {
   font-weight: 700;
   letter-spacing: 0.5px;
   backdrop-filter: blur(12px);
+}
+
+.map-credit {
+  padding-left: 4px;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 9px;
+  font-weight: 600;
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.45);
 }
 
 .version-tag {

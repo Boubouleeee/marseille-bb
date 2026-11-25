@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { nextCombo, policeCount, scoreForProp, wantedStars, type PropKind } from "./gameLogic";
 import "./style.css";
 
@@ -17,14 +18,37 @@ root.append(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#b5d8e6");
-scene.fog = new THREE.Fog("#b5d8e6", 65, 155);
+scene.fog = new THREE.Fog("#b5d8e6", 850, 2100);
 
-const camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 220);
+const camera = new THREE.PerspectiveCamera(54, window.innerWidth / window.innerHeight, 0.1, 3500);
 const clock = new THREE.Clock();
-const worldColliders: Array<{ x: number; z: number; width: number; depth: number }> = [];
+const colliderGrid = new Map<string, Array<{ x: number; z: number; width: number; depth: number }>>();
 const destructibles: Destructible[] = [];
 const particles: Particle[] = [];
 const popups: Popup[] = [];
+const cellSize = 32;
+
+interface OSMMap {
+  schemaVersion: number;
+  attribution: string;
+  source: string;
+  bounds: { minX: number; maxX: number; minZ: number; maxZ: number };
+  spawn: { x: number; z: number; street: string };
+  roads: Array<{ name: string; kind: string; width: number; lines: number[][][] }>;
+  buildings: Array<{ id: string; points: number[][]; height: number; kind: string; levels: number | null }>;
+  waters: Array<{ id: string; points: number[][] }>;
+}
+
+const mapResponse = await fetch(`${import.meta.env.BASE_URL}maps/vieux-port.json`);
+if (!mapResponse.ok) throw new Error(`Impossible de charger la carte OSM du Vieux-Port (${mapResponse.status}).`);
+const osmMap = await mapResponse.json() as OSMMap;
+if (osmMap.schemaVersion !== 1 || !osmMap.roads.length || !osmMap.buildings.length) {
+  throw new Error("La carte OSM du Vieux-Port est invalide ou incomplete.");
+}
+const mapBounds = osmMap.bounds;
+const mapWidth = mapBounds.maxX - mapBounds.minX;
+const mapDepth = mapBounds.maxZ - mapBounds.minZ;
+const startPosition = new THREE.Vector3(osmMap.spawn.x, 0, osmMap.spawn.z);
 
 const materials = {
   white: new THREE.MeshStandardMaterial({ color: "#f4f3eb", roughness: 0.8 }),
@@ -65,217 +89,194 @@ function box(
   return item;
 }
 
-function makePavingTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = 256;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Impossible de creer la texture du pave.");
-  context.fillStyle = "#b5a995";
-  context.fillRect(0, 0, 256, 256);
-  for (let y = 0; y < 256; y += 32) {
-    for (let x = 0; x < 256; x += 32) {
-      const shade = 160 + Math.floor(Math.random() * 27);
-      context.fillStyle = `rgb(${shade}, ${shade - 10}, ${shade - 27})`;
-      context.fillRect(x + 1, y + 1, 30, 30);
-      context.strokeStyle = "rgba(80, 68, 54, .18)";
-      context.strokeRect(x + 0.5, y + 0.5, 31, 31);
-    }
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(8, 8);
-  return texture;
-}
-
-function makeFacadeTexture(base: string, seed: number): THREE.CanvasTexture {
-  const canvas = document.createElement("canvas");
-  canvas.width = 256;
-  canvas.height = 512;
-  const context = canvas.getContext("2d");
-  if (!context) throw new Error("Impossible de creer la texture des facades.");
-  context.fillStyle = base;
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = "rgba(255,255,255,.15)";
-  for (let i = 0; i < 22; i++) {
-    const x = ((i * 41 + seed * 17) % 224) + 10;
-    const y = ((i * 67 + seed * 29) % 480) + 16;
-    context.fillRect(x, y, 5, 8);
-  }
-  const rows = 5;
-  for (let row = 0; row < rows; row++) {
-    for (let column = 0; column < 3; column++) {
-      const x = 30 + column * 76 + ((row + seed) % 2) * 5;
-      const y = 40 + row * 90;
-      context.fillStyle = "#f4dcaa";
-      context.fillRect(x - 5, y - 5, 42, 57);
-      context.fillStyle = row % 2 ? "#477484" : "#547e89";
-      context.fillRect(x, y, 32, 46);
-      context.fillStyle = "rgba(247,223,169,.46)";
-      context.fillRect(x + 3, y + 3, 11, 40);
-      context.fillStyle = "#eee2ca";
-      context.fillRect(x - 5, y + 45, 42, 5);
-    }
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  return texture;
-}
-
 const hemi = new THREE.HemisphereLight("#e7f8ff", "#78684f", 2.05);
 scene.add(hemi);
 const sun = new THREE.DirectionalLight("#fff0d3", 3.15);
 sun.position.set(-32, 55, 25);
 sun.castShadow = true;
-sun.shadow.mapSize.set(1536, 1536);
-sun.shadow.camera.left = -52;
-sun.shadow.camera.right = 52;
-sun.shadow.camera.top = 58;
-sun.shadow.camera.bottom = -58;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -180;
+sun.shadow.camera.right = 180;
+sun.shadow.camera.top = 180;
+sun.shadow.camera.bottom = -180;
 sun.shadow.normalBias = 0.035;
 scene.add(sun);
 
+function addCollider(collider: { x: number; z: number; width: number; depth: number }): void {
+  const minCellX = Math.floor((collider.x - collider.width / 2) / cellSize);
+  const maxCellX = Math.floor((collider.x + collider.width / 2) / cellSize);
+  const minCellZ = Math.floor((collider.z - collider.depth / 2) / cellSize);
+  const maxCellZ = Math.floor((collider.z + collider.depth / 2) / cellSize);
+  for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+    for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
+      const key = `${cellX},${cellZ}`;
+      const cell = colliderGrid.get(key) ?? [];
+      cell.push(collider);
+      colliderGrid.set(key, cell);
+    }
+  }
+}
+
 function addCity(): void {
-  const pave = makePavingTexture();
   const ground = mesh(
-    new THREE.PlaneGeometry(110, 125),
-    new THREE.MeshStandardMaterial({ map: pave, roughness: 0.96 }),
+    new THREE.PlaneGeometry(mapWidth + 20, mapDepth + 20),
+    new THREE.MeshStandardMaterial({ color: "#c5b89f", roughness: 0.96 }),
     scene,
-    [0, -0.13, 18],
+    [(mapBounds.minX + mapBounds.maxX) / 2, -0.2, (mapBounds.minZ + mapBounds.maxZ) / 2],
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
 
-  const sea = mesh(
-    new THREE.PlaneGeometry(130, 62),
-    new THREE.MeshStandardMaterial({ color: "#318aa4", roughness: 0.32, metalness: 0.08 }),
-    scene,
-    [0, -0.32, -53],
-  );
-  sea.rotation.x = -Math.PI / 2;
-
-  const waveMaterial = new THREE.MeshBasicMaterial({ color: "#9bd8d9", transparent: true, opacity: 0.33 });
-  for (let i = 0; i < 12; i++) {
-    const wave = mesh(new THREE.TorusGeometry(1.3 + (i % 3) * 0.55, 0.025, 5, 36), waveMaterial, scene, [
-      -49 + ((i * 19) % 96),
-      -0.27,
-      -65 + ((i * 11) % 28),
-    ]);
-    wave.rotation.x = Math.PI / 2;
-  }
-
-  box(scene, [110, 0.55, 3], new THREE.MeshStandardMaterial({ color: "#d0b894", roughness: 0.89 }), [0, 0.05, -27]);
-  box(scene, [110, 0.28, 8], new THREE.MeshStandardMaterial({ color: "#c5b498", roughness: 0.91 }), [0, -0.02, -21.5]);
-  box(scene, [110, 0.22, 0.45], new THREE.MeshStandardMaterial({ color: "#eee2c9" }), [0, 0.2, -25.6]);
-
-  const roadMat = new THREE.MeshStandardMaterial({ color: "#74797a", roughness: 0.96 });
-  const road = mesh(new THREE.PlaneGeometry(110, 10), roadMat, scene, [0, -0.03, 1.5]);
-  road.rotation.x = -Math.PI / 2;
-  for (let x = -48; x <= 48; x += 8) {
-    box(scene, [3.2, 0.025, 0.16], new THREE.MeshStandardMaterial({ color: "#ead9a5" }), [x, 0, 1.5]);
-  }
-  box(scene, [1.4, 0.18, 9.5], new THREE.MeshStandardMaterial({ color: "#ceb990" }), [-20.5, 0.03, 1.5]);
-  box(scene, [1.4, 0.18, 9.5], new THREE.MeshStandardMaterial({ color: "#ceb990" }), [20.5, 0.03, 1.5]);
-
-  const palette = ["#dfae84", "#e7c2a0", "#d89479", "#dbc99d", "#c5a68b", "#e1b695"];
-  const placements: Array<[number, number, number, number, number]> = [];
-  for (const x of [-32, 32]) {
-    for (const z of [-10, 9, 28, 47]) {
-      placements.push([x, z, 12, 13, 10 + ((Math.abs(x + z) % 4) + 1) * 1.65]);
-    }
-  }
-  for (const x of [-25, -9, 8, 24]) placements.push([x, 53, 14, 14, 13 + (Math.abs(x) % 3) * 1.4]);
-
-  placements.forEach(([x, z, width, depth, height], index) => {
-    const texture = makeFacadeTexture(palette[index % palette.length], index + 2);
-    const wallMaterial = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.9 });
-    const block = box(scene, [width, height, depth], wallMaterial, [x, height / 2, z], true);
-    block.castShadow = true;
-    worldColliders.push({ x, z, width, depth });
-    const roof = box(scene, [width + 0.35, 0.45, depth + 0.35], new THREE.MeshStandardMaterial({ color: "#b9715d", roughness: 0.92 }), [
-      x,
-      height + 0.18,
-      z,
-    ]);
-    roof.castShadow = true;
-    for (let side = -1; side <= 1; side += 2) {
-      for (let row = 0; row < 3; row++) {
-        const balcony = box(
-          scene,
-          [0.95, 0.13, 0.47],
-          new THREE.MeshStandardMaterial({ color: "#e8d8ba", roughness: 0.8 }),
-          [x + side * (width / 2 + 0.18), 2.7 + row * 2.5, z - 1 + (row % 2) * 2],
+  const roadPositions: number[] = [];
+  const roadColors: number[] = [];
+  const roadIndices: number[] = [];
+  const roadColor = new THREE.Color();
+  for (const road of osmMap.roads) {
+    roadColor.set(["primary", "secondary", "tertiary", "trunk", "motorway"].includes(road.kind) ? "#727a7d" : "#8a8b86");
+    for (const line of road.lines) {
+      for (let index = 1; index < line.length; index++) {
+        const [ax, az] = line[index - 1];
+        const [bx, bz] = line[index];
+        const dx = bx - ax;
+        const dz = bz - az;
+        const length = Math.hypot(dx, dz);
+        if (length < 0.3) continue;
+        const halfWidth = road.width / 2;
+        const offsetX = (-dz / length) * halfWidth;
+        const offsetZ = (dx / length) * halfWidth;
+        const base = roadPositions.length / 3;
+        roadPositions.push(
+          ax + offsetX, -0.08, az + offsetZ,
+          ax - offsetX, -0.08, az - offsetZ,
+          bx - offsetX, -0.08, bz - offsetZ,
+          bx + offsetX, -0.08, bz + offsetZ,
         );
-        balcony.castShadow = true;
+        for (let vertex = 0; vertex < 4; vertex++) roadColors.push(roadColor.r, roadColor.g, roadColor.b);
+        roadIndices.push(base, base + 2, base + 1, base, base + 3, base + 2);
       }
     }
-  });
-
-  const boatMaterial = new THREE.MeshStandardMaterial({ color: "#f0eee3", roughness: 0.74 });
-  for (let i = 0; i < 7; i++) {
-    const x = -37 + i * 12;
-    const z = -36 - (i % 2) * 3.6;
-    const boat = new THREE.Group();
-    scene.add(boat);
-    boat.position.set(x, -0.12, z);
-    const hull = mesh(new THREE.CylinderGeometry(0.2, 0.85, 6, 7), boatMaterial, boat);
-    hull.rotation.z = Math.PI / 2;
-    hull.scale.set(1, 0.72, 0.7);
-    box(boat, [1.9, 0.85, 1.3], new THREE.MeshStandardMaterial({ color: i % 2 ? "#d76c5f" : "#467e91" }), [0.3, 0.45, 0]);
-    box(boat, [0.08, 2.8, 0.08], new THREE.MeshStandardMaterial({ color: "#dac9a9" }), [0.2, 1.4, 0]);
-    const sail = mesh(new THREE.ConeGeometry(1.25, 2.2, 3), new THREE.MeshStandardMaterial({ color: "#f3ead2", side: THREE.DoubleSide }), boat, [-0.5, 1.45, 0]);
-    sail.rotation.z = -Math.PI / 2;
   }
-
-  for (const x of [-17, 17]) {
-    for (const z of [-19, -10, 13, 23, 35]) addPalm(x + (z % 3), z);
-  }
-  for (const [x, z] of [[-13, -17], [-7, -18], [8, -18], [14, -17], [-16, 5], [16, 8]]) {
-    addCafeSet(x, z);
-  }
-}
-
-function addPalm(x: number, z: number): void {
-  const palm = new THREE.Group();
-  scene.add(palm);
-  palm.position.set(x, 0, z);
-  const trunk = mesh(new THREE.CylinderGeometry(0.19, 0.32, 5.3, 7), new THREE.MeshStandardMaterial({ color: "#9a7958", roughness: 1 }), palm, [0, 2.65, 0]);
-  trunk.castShadow = true;
-  for (let i = 0; i < 7; i++) {
-    const angle = (i / 7) * Math.PI * 2;
-    const leaf = mesh(new THREE.ConeGeometry(0.35, 3.1, 5), materials.leaf, palm, [
-      Math.cos(angle) * 1.08,
-      5.1 - (i % 2) * 0.2,
-      Math.sin(angle) * 1.08,
-    ]);
-    leaf.rotation.z = Math.cos(angle) * 0.9;
-    leaf.rotation.x = Math.sin(angle) * 0.9;
-    leaf.castShadow = true;
-  }
-}
-
-function addCafeSet(x: number, z: number): void {
-  const table = new THREE.Group();
-  scene.add(table);
-  table.position.set(x, 0, z);
-  const leg = mesh(new THREE.CylinderGeometry(0.09, 0.11, 0.9, 8), materials.darkBlue, table, [0, 0.5, 0]);
-  leg.castShadow = true;
-  const top = mesh(new THREE.CylinderGeometry(0.78, 0.78, 0.12, 12), materials.white, table, [0, 0.98, 0]);
-  top.castShadow = true;
-  for (const side of [-1, 1]) {
-    const chair = box(table, [0.42, 0.58, 0.42], side < 0 ? materials.coral : materials.blue, [side * 1.25, 0.35, 0.2], true);
-    chair.rotation.y = side * 0.18;
-  }
-  const parasol = mesh(
-    new THREE.ConeGeometry(1.7, 0.78, 10),
-    new THREE.MeshStandardMaterial({ color: x % 2 ? "#ed876b" : "#55bfd0", roughness: 0.83 }),
-    table,
-    [0, 2.32, 0],
+  const roadGeometry = new THREE.BufferGeometry();
+  roadGeometry.setAttribute("position", new THREE.Float32BufferAttribute(roadPositions, 3));
+  roadGeometry.setAttribute("color", new THREE.Float32BufferAttribute(roadColors, 3));
+  roadGeometry.setIndex(roadIndices);
+  roadGeometry.computeVertexNormals();
+  const roadMesh = mesh(
+    roadGeometry,
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.97 }),
+    scene,
   );
-  parasol.rotation.x = Math.PI;
-  parasol.castShadow = true;
-  mesh(new THREE.CylinderGeometry(0.045, 0.045, 2, 8), materials.white, table, [0, 1.35, 0]);
+  roadMesh.receiveShadow = true;
+
+  const buildingGeometries: THREE.BufferGeometry[][] = Array.from({ length: 6 }, () => []);
+  const facadeColors = ["#dfb58e", "#d89c80", "#e6c9a2", "#cfad8e", "#d7c19a", "#c99c84"];
+  const windowSpecs: Array<{ x: number; y: number; z: number; yaw: number; width: number }> = [];
+  for (let index = 0; index < osmMap.buildings.length; index++) {
+    const building = osmMap.buildings[index];
+    const shape = new THREE.Shape();
+    building.points.slice(0, -1).forEach(([x, z], pointIndex) => {
+      if (pointIndex === 0) shape.moveTo(x, -z);
+      else shape.lineTo(x, -z);
+    });
+    shape.closePath();
+    const geometry = new THREE.ExtrudeGeometry(shape, {
+      depth: building.height,
+      bevelEnabled: false,
+      curveSegments: 1,
+      steps: 1,
+    });
+    geometry.rotateX(-Math.PI / 2);
+    geometry.translate(0, 0.05, 0);
+    buildingGeometries[index % buildingGeometries.length].push(geometry);
+
+    const xs = building.points.map(([x]) => x);
+    const zs = building.points.map(([, z]) => z);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+    addCollider({ x: (minX + maxX) / 2, z: (minZ + maxZ) / 2, width: maxX - minX, depth: maxZ - minZ });
+
+    if (index % 3 !== 0) continue;
+    const floors = Math.min(7, Math.max(1, Math.floor(building.height / 3.2)));
+    for (let edge = 1; edge < building.points.length; edge++) {
+      const [ax, az] = building.points[edge - 1];
+      const [bx, bz] = building.points[edge];
+      const dx = bx - ax;
+      const dz = bz - az;
+      const length = Math.hypot(dx, dz);
+      const count = Math.min(8, Math.floor(length / 8));
+      for (let floor = 0; floor < floors; floor++) {
+        for (let window = 0; window < count; window++) {
+          const ratio = (window + 1) / (count + 1);
+          windowSpecs.push({
+            x: ax + dx * ratio,
+            y: 1.25 + floor * 3.1,
+            z: az + dz * ratio,
+            yaw: Math.atan2(-dz, dx),
+            width: Math.min(1.6, length / (count + 1) * 0.45),
+          });
+        }
+      }
+    }
+  }
+
+  for (let index = 0; index < buildingGeometries.length; index++) {
+    const geometries = buildingGeometries[index];
+    if (!geometries.length) continue;
+    const merged = mergeGeometries(geometries, false);
+    if (!merged) throw new Error("Impossible de regrouper les facades OSM.");
+    mesh(
+      merged,
+      new THREE.MeshStandardMaterial({ color: facadeColors[index], roughness: 0.91 }),
+      scene,
+    ).castShadow = true;
+    geometries.forEach((geometry) => geometry.dispose());
+  }
+
+  if (windowSpecs.length) {
+    const windowInstances = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1, 1.35, 0.14),
+      new THREE.MeshStandardMaterial({ color: "#477889", roughness: 0.52, metalness: 0.12 }),
+      windowSpecs.length,
+    );
+    const dummy = new THREE.Object3D();
+    windowSpecs.forEach((window, index) => {
+      dummy.position.set(window.x, window.y, window.z);
+      dummy.rotation.set(0, window.yaw, 0);
+      dummy.scale.set(window.width, 1, 1);
+      dummy.updateMatrix();
+      windowInstances.setMatrixAt(index, dummy.matrix);
+    });
+    windowInstances.instanceMatrix.needsUpdate = true;
+    windowInstances.castShadow = false;
+    scene.add(windowInstances);
+  }
+
+  const waterGeometries: THREE.BufferGeometry[] = [];
+  for (const water of osmMap.waters) {
+    const shape = new THREE.Shape();
+    water.points.slice(0, -1).forEach(([x, z], index) => {
+      if (index === 0) shape.moveTo(x, -z);
+      else shape.lineTo(x, -z);
+    });
+    shape.closePath();
+    const geometry = new THREE.ShapeGeometry(shape);
+    geometry.rotateX(-Math.PI / 2);
+    geometry.translate(0, -0.16, 0);
+    waterGeometries.push(geometry);
+  }
+  if (waterGeometries.length) {
+    const waterGeometry = mergeGeometries(waterGeometries, false);
+    if (waterGeometry) {
+      mesh(
+        waterGeometry,
+        new THREE.MeshStandardMaterial({ color: "#328ca2", roughness: 0.34, metalness: 0.08, side: THREE.DoubleSide }),
+        scene,
+      );
+    }
+    waterGeometries.forEach((geometry) => geometry.dispose());
+  }
 }
 
 function createPlayer(): THREE.Group {
@@ -307,7 +308,7 @@ function createPlayer(): THREE.Group {
     legs.push(leg);
   }
   player.userData.limbs = { arms, legs };
-  player.position.set(0, 0, 8);
+  player.position.copy(startPosition);
   scene.add(player);
   return player;
 }
@@ -367,7 +368,9 @@ function addProps(): void {
     ["sign", 2.4, 18.5, "#e2bb4d"],
     ["crate", -15, 18.8, "#d99052"],
   ];
-  for (const [kind, x, z, tint] of layout) destructibles.push(createProp(kind, x, z, tint));
+  for (const [kind, x, z, tint] of layout) {
+    destructibles.push(createProp(kind, startPosition.x + x, startPosition.z + z, tint));
+  }
 }
 
 interface PoliceCar {
@@ -442,12 +445,15 @@ function buildUi(container: HTMLElement) {
     </aside>
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <footer class="bottom-bar">
-      <div class="district-tag">● &nbsp; QUARTIER DU PORT · ZONE FICTIVE</div>
-      <div class="version-tag">Prototype jouable · solo</div>
+      <div class="location-stack">
+        <div class="district-tag">MARSEILLE · <span id="street-name">LE PORT</span></div>
+        <div class="map-credit">© OpenStreetMap contributors · ODbL</div>
+      </div>
+      <div class="version-tag">Carte réelle · prototype solo</div>
     </footer>
     <section class="modal" id="modal" aria-modal="true" role="dialog" aria-labelledby="modal-title">
       <div class="modal-card">
-        <div class="modal-kicker" id="modal-kicker">Prototype solo · V0.1–V0.3</div>
+        <div class="modal-kicker" id="modal-kicker">Carte OpenStreetMap · zone test</div>
         <h1 class="modal-title" id="modal-title">MARSEILLE <span>BB</span></h1>
         <p class="modal-copy" id="modal-copy">Un petit quartier mediterraneen, une impulsion arcade et des accessoires qui repartent en confettis. Enchaine les combos, puis seme les voitures de patrouille-jouets.</p>
         <div class="modal-meta" id="modal-meta"><kbd>ZQSD</kbd>/<kbd>WASD</kbd> bouger · <kbd>Shift</kbd> sprinter · <kbd>Espace</kbd> sauter<br><kbd>E</kbd> ou clic gauche pres d'un accessoire pour le faire rebondir.</div>
@@ -472,6 +478,7 @@ function buildUi(container: HTMLElement) {
     soundButton: hud.querySelector<HTMLButtonElement>("#sound-button")!,
     pauseButton: hud.querySelector<HTMLButtonElement>("#pause-button")!,
     restartButton: hud.querySelector<HTMLButtonElement>("#restart-button")!,
+    streetName: hud.querySelector<HTMLElement>("#street-name")!,
   };
 }
 
@@ -586,9 +593,9 @@ function setModal(mode: "intro" | "pause" | null): void {
   modalMode = mode;
   ui.modal.hidden = mode === null;
   if (mode === "intro") {
-    ui.modalKicker.textContent = "Prototype solo · V0.1–V0.3";
+    ui.modalKicker.textContent = "Carte OpenStreetMap · zone test";
     ui.modalTitle.innerHTML = "MARSEILLE <span>BB</span>";
-    ui.modalCopy.textContent = "Un petit quartier mediterraneen, une impulsion arcade et des accessoires qui repartent en confettis. Enchaine les combos, puis seme les voitures de patrouille-jouets.";
+    ui.modalCopy.textContent = "Explore les rues et les empreintes de batiments du Vieux-Port, converties depuis OpenStreetMap. Fais rebondir les accessoires fictifs, enchaine les combos et seme les voitures de patrouille-jouets.";
     ui.modalMeta.innerHTML = "<kbd>ZQSD</kbd>/<kbd>WASD</kbd> bouger · <kbd>Shift</kbd> sprinter · <kbd>Espace</kbd> sauter<br><kbd>E</kbd> ou clic gauche pres d'un accessoire pour le faire rebondir.";
     ui.modalAction.textContent = "Entrer dans le quartier";
   } else if (mode === "pause") {
@@ -616,7 +623,7 @@ function resetGame(): void {
   combo = 0;
   comboTime = 0;
   heat = 0;
-  player.position.set(0, 0, 8);
+  player.position.copy(startPosition);
   player.rotation.y = 0;
   playerY = 0;
   jumpVelocity = 0;
@@ -684,10 +691,27 @@ function interact(): void {
 }
 
 function collides(x: number, z: number, radius: number): boolean {
-  if (x < -48 + radius || x > 48 - radius || z < -23 + radius || z > 62 - radius) return true;
-  return worldColliders.some((block) =>
-    Math.abs(x - block.x) < block.width / 2 + radius && Math.abs(z - block.z) < block.depth / 2 + radius,
-  );
+  if (
+    x < mapBounds.minX + radius
+    || x > mapBounds.maxX - radius
+    || z < mapBounds.minZ + radius
+    || z > mapBounds.maxZ - radius
+  ) return true;
+  const minCellX = Math.floor((x - radius) / cellSize);
+  const maxCellX = Math.floor((x + radius) / cellSize);
+  const minCellZ = Math.floor((z - radius) / cellSize);
+  const maxCellZ = Math.floor((z + radius) / cellSize);
+  for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+    for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
+      for (const block of colliderGrid.get(`${cellX},${cellZ}`) ?? []) {
+        if (
+          Math.abs(x - block.x) < block.width / 2 + radius
+          && Math.abs(z - block.z) < block.depth / 2 + radius
+        ) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function updatePlayer(delta: number): void {
@@ -766,7 +790,7 @@ function updatePolice(delta: number, now: number): void {
       combo = 0;
       comboTime = 0;
       lastHitTime = 0;
-      player.position.set(0, 0, 8);
+      player.position.copy(startPosition);
       playerY = 0;
       captureCooldown = 2.5;
       showToast("Capture arcade ! -28 % du score, puis retour au quartier.");
@@ -827,32 +851,79 @@ function updateCamera(delta: number): void {
   camera.lookAt(player.position.x, playerY + 1.05, player.position.z);
 }
 
+function closestStreetName(x: number, z: number): string {
+  let closestName = "";
+  let closestDistance = 35;
+  for (const road of osmMap.roads) {
+    if (!road.name) continue;
+    for (const line of road.lines) {
+      for (let index = 1; index < line.length; index++) {
+        const [ax, az] = line[index - 1];
+        const [bx, bz] = line[index];
+        const dx = bx - ax;
+        const dz = bz - az;
+        const lengthSq = dx * dx + dz * dz;
+        const ratio = lengthSq === 0
+          ? 0
+          : THREE.MathUtils.clamp(((x - ax) * dx + (z - az) * dz) / lengthSq, 0, 1);
+        const distance = Math.hypot(x - (ax + ratio * dx), z - (az + ratio * dz));
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestName = road.name;
+        }
+      }
+    }
+  }
+  return closestName || "VIEUX-PORT";
+}
+
 function drawMinimap(): void {
   const context = minimapContext!;
   const canvas = ui.minimap;
   context.clearRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = "#287c91";
-  context.fillRect(0, 0, canvas.width, canvas.height * 0.25);
-  context.fillStyle = "#d1c1a0";
-  context.fillRect(0, canvas.height * 0.25, canvas.width, canvas.height * 0.1);
-  context.fillStyle = "#a99c83";
-  context.fillRect(0, canvas.height * 0.35, canvas.width, canvas.height * 0.65);
+  context.fillStyle = "#b9ad96";
+  context.fillRect(0, 0, canvas.width, canvas.height);
   const mapPoint = (x: number, z: number) => ({
-    x: ((x + 50) / 100) * canvas.width,
-    y: ((z + 32) / 100) * canvas.height,
+    x: ((x - mapBounds.minX) / mapWidth) * canvas.width,
+    y: ((mapBounds.maxZ - z) / mapDepth) * canvas.height,
   });
-  context.fillStyle = "rgba(90, 71, 58, .62)";
-  for (const block of worldColliders) {
-    const point = mapPoint(block.x, block.z);
-    context.fillRect(point.x - block.width * 1.5, point.y - block.depth * 1.05, block.width * 3, block.depth * 2.1);
+  context.fillStyle = "#328ca2";
+  for (const water of osmMap.waters) {
+    context.beginPath();
+    water.points.forEach(([x, z], index) => {
+      const point = mapPoint(x, z);
+      if (index === 0) context.moveTo(point.x, point.y);
+      else context.lineTo(point.x, point.y);
+    });
+    context.closePath();
+    context.fill();
   }
-  context.strokeStyle = "rgba(255,255,255,.4)";
-  context.lineWidth = 2;
-  context.beginPath();
-  const roadY = mapPoint(0, 1.5).y;
-  context.moveTo(0, roadY);
-  context.lineTo(canvas.width, roadY);
-  context.stroke();
+  context.fillStyle = "rgba(91, 74, 59, .66)";
+  for (const building of osmMap.buildings) {
+    context.beginPath();
+    building.points.forEach(([x, z], index) => {
+      const point = mapPoint(x, z);
+      if (index === 0) context.moveTo(point.x, point.y);
+      else context.lineTo(point.x, point.y);
+    });
+    context.closePath();
+    context.fill();
+  }
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  for (const road of osmMap.roads) {
+    context.strokeStyle = road.kind === "primary" || road.kind === "secondary" ? "#eee1c8" : "#f7f1e4";
+    context.lineWidth = Math.max(0.7, (road.width / mapWidth) * canvas.width * 0.75);
+    for (const line of road.lines) {
+      context.beginPath();
+      line.forEach(([x, z], index) => {
+        const point = mapPoint(x, z);
+        if (index === 0) context.moveTo(point.x, point.y);
+        else context.lineTo(point.x, point.y);
+      });
+      context.stroke();
+    }
+  }
   for (const car of policeCars) {
     if (!car.active) continue;
     const point = mapPoint(car.group.position.x, car.group.position.z);
@@ -869,8 +940,11 @@ function drawMinimap(): void {
   context.strokeStyle = "#087d9a";
   context.lineWidth = 2;
   context.stroke();
+  ui.streetName.textContent = closestStreetName(player.position.x, player.position.z);
 }
 
+let minimapRefresh = 0;
+let streetRefresh = 0;
 function animate(): void {
   requestAnimationFrame(animate);
   const delta = Math.min(clock.getDelta(), 0.04);
@@ -898,7 +972,14 @@ function animate(): void {
     updateHud();
   }
   updateCamera(delta);
-  drawMinimap();
+  if (now - minimapRefresh > 250) {
+    drawMinimap();
+    minimapRefresh = now;
+  }
+  if (now - streetRefresh > 650) {
+    ui.streetName.textContent = closestStreetName(player.position.x, player.position.z);
+    streetRefresh = now;
+  }
   renderer.render(scene, camera);
 }
 
@@ -963,6 +1044,7 @@ window.addEventListener("resize", () => {
 
 addCity();
 addProps();
+ui.streetName.textContent = osmMap.spawn.street || "VIEUX-PORT";
 updateCamera(1);
 updateHud();
 animate();
