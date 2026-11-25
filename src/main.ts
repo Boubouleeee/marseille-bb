@@ -197,7 +197,6 @@ function addCity(): void {
     const maxZ = Math.max(...zs);
     addCollider({ x: (minX + maxX) / 2, z: (minZ + maxZ) / 2, width: maxX - minX, depth: maxZ - minZ });
 
-    if (index % 3 !== 0) continue;
     const floors = Math.min(7, Math.max(1, Math.floor(building.height / 3.2)));
     for (let edge = 1; edge < building.points.length; edge++) {
       const [ax, az] = building.points[edge - 1];
@@ -205,7 +204,7 @@ function addCity(): void {
       const dx = bx - ax;
       const dz = bz - az;
       const length = Math.hypot(dx, dz);
-      const count = Math.min(8, Math.floor(length / 8));
+      const count = length < 4 ? 0 : Math.min(4, Math.max(1, Math.floor(length / 7)));
       for (let floor = 0; floor < floors; floor++) {
         for (let window = 0; window < count; window++) {
           const ratio = (window + 1) / (count + 1);
@@ -413,6 +412,7 @@ function createPoliceCar(): PoliceCar {
 const policeCars = [createPoliceCar(), createPoliceCar(), createPoliceCar()];
 
 const ui = buildUi(root);
+ui.modal.style.pointerEvents = "auto";
 const minimapContext = ui.minimap.getContext("2d");
 if (!minimapContext) throw new Error("Impossible d'initialiser la mini-carte.");
 
@@ -456,7 +456,7 @@ function buildUi(container: HTMLElement) {
         <div class="modal-kicker" id="modal-kicker">Carte OpenStreetMap · zone test</div>
         <h1 class="modal-title" id="modal-title">MARSEILLE <span>BB</span></h1>
         <p class="modal-copy" id="modal-copy">Un petit quartier mediterraneen, une impulsion arcade et des accessoires qui repartent en confettis. Enchaine les combos, puis seme les voitures de patrouille-jouets.</p>
-        <div class="modal-meta" id="modal-meta"><kbd>ZQSD</kbd>/<kbd>WASD</kbd> bouger · <kbd>Shift</kbd> sprinter · <kbd>Espace</kbd> sauter<br><kbd>E</kbd> ou clic gauche pres d'un accessoire pour le faire rebondir.</div>
+        <div class="modal-meta" id="modal-meta"><kbd>ZQSD</kbd>/<kbd>WASD</kbd>/<kbd>↑↓←→</kbd> bouger · <kbd>Shift</kbd> sprinter · <kbd>Espace</kbd> sauter<br><kbd>E</kbd> ou clic gauche pres d'un accessoire pour le faire rebondir.</div>
         <button class="control-button" id="modal-action" type="button">Entrer dans le quartier</button>
       </div>
     </section>`;
@@ -579,7 +579,7 @@ let toastTimer = 0;
 let playerY = 0;
 let jumpVelocity = 0;
 let cameraYaw = 0;
-let cameraDistance = 7.8;
+let cameraDistance = 12.5;
 let modalMode: "intro" | "pause" | null = "intro";
 let lastPoliceBlink = 0;
 let captureCooldown = 0;
@@ -846,7 +846,7 @@ function updateEffects(delta: number): void {
 }
 
 function updateCamera(delta: number): void {
-  const behind = new THREE.Vector3(Math.sin(cameraYaw) * cameraDistance, 4.25, Math.cos(cameraYaw) * cameraDistance);
+  const behind = new THREE.Vector3(Math.sin(cameraYaw) * cameraDistance, 9.5, Math.cos(cameraYaw) * cameraDistance);
   const desired = player.position.clone().add(behind);
   desired.y = Math.max(desired.y, playerY + 2.5);
   camera.position.lerp(desired, 1 - Math.exp(-5.4 * delta));
@@ -1005,7 +1005,7 @@ renderer.domElement.addEventListener("click", () => {
   if (!dragMoved) interact();
 });
 renderer.domElement.addEventListener("wheel", (event) => {
-  cameraDistance = THREE.MathUtils.clamp(cameraDistance + Math.sign(event.deltaY) * 0.6, 5.2, 11);
+  cameraDistance = THREE.MathUtils.clamp(cameraDistance + Math.sign(event.deltaY) * 0.6, 5.2, 16);
 }, { passive: true });
 
 window.addEventListener("keydown", (event) => {

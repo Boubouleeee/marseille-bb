@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { gunzipSync } from "node:zlib";
 import { buildMap, parseOsmXml } from "./generate-osm-map.mjs";
 
 const fixture = `<?xml version="1.0"?>
@@ -35,7 +37,7 @@ test("parses OSM way tags, node references and XML entities", () => {
 });
 
 test("converts geographic features to metre-scale roads and building footprints", () => {
-  const map = buildMap(fixture);
+  const map = buildMap(fixture, { spawnTarget: [-260, -40] });
   assert.equal(map.counts.roads, 1);
   assert.equal(map.counts.buildings, 1);
   assert.equal(map.counts.waters, 1);
@@ -45,4 +47,18 @@ test("converts geographic features to metre-scale roads and building footprints"
   assert.ok(Math.abs(second[0] - first[0]) > 100);
   assert.ok(map.buildings[0].points.length >= 4);
   assert.equal(map.license, "ODbL-1.0");
+});
+
+test("places the game start among the dense Old Port buildings", () => {
+  const source = gunzipSync(readFileSync(new URL("../data/osm/vieux-port.osm.gz", import.meta.url))).toString();
+  const map = buildMap(source);
+  const nearbyBuildings = map.buildings.filter((building) => {
+    const center = building.points.reduce(
+      (point, [x, z]) => [point[0] + x / building.points.length, point[1] + z / building.points.length],
+      [0, 0],
+    );
+    return Math.hypot(center[0] - map.spawn.x, center[1] - map.spawn.z) < 50;
+  });
+  assert.equal(map.spawn.street, "Place Jean-Claude Izzo");
+  assert.ok(nearbyBuildings.length >= 20);
 });

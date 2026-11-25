@@ -15,6 +15,7 @@ export const OLD_PORT_BBOX = Object.freeze({
 });
 
 export const OLD_PORT_ORIGIN = Object.freeze({ lon: 5.3728, lat: 43.2957 });
+export const OLD_PORT_SPAWN_TARGET = Object.freeze([-456.1, 311.5]);
 
 function decodeXml(value) {
   return value
@@ -244,7 +245,11 @@ function nearestOnRoad(point, roads) {
   return nearest;
 }
 
-export function buildMap(osmXml, { bbox = OLD_PORT_BBOX, origin = OLD_PORT_ORIGIN } = {}) {
+export function buildMap(osmXml, {
+  bbox = OLD_PORT_BBOX,
+  origin = OLD_PORT_ORIGIN,
+  spawnTarget = OLD_PORT_SPAWN_TARGET,
+} = {}) {
   const { nodes, ways, relations } = parseOsmXml(osmXml);
   const projectedBounds = [
     project({ lat: bbox.south, lon: bbox.west }, origin),
@@ -334,7 +339,7 @@ export function buildMap(osmXml, { bbox = OLD_PORT_BBOX, origin = OLD_PORT_ORIGI
   if (!roads.length || !buildings.length) {
     throw new Error(`L'extrait OSM est incomplet (routes: ${roads.length}, empreintes: ${buildings.length}, batiments fermes: ${closedBuildingWays}).`);
   }
-  const spawn = nearestOnRoad([-260, -40], roads);
+  const spawn = nearestOnRoad(spawnTarget, roads);
   if (!spawn) throw new Error("Aucune route OSM ne permet de placer le point de depart.");
 
   return {

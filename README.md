@@ -1,6 +1,6 @@
 # Marseille BB
 
-Prototype navigateur solo dans une zone geographique reelle autour du Vieux-Port. Les routes et empreintes de batiments du quartier sont extraites d'OpenStreetMap, reprojetees en coordonnees locales en metres, puis extrudees en 3D. La mini-carte et le nom de rue proche utilisent le meme extrait. Les accessoires destructibles, l'avatar, les effets et la police restent des elements fictifs et arcade.
+Prototype navigateur solo dans une zone geographique reelle autour du Vieux-Port. Les routes et empreintes de batiments du quartier sont extraites d'OpenStreetMap, reprojetees en coordonnees locales en metres, puis extrudees en 3D avec des facades fenetrees. Le depart se fait place Jean-Claude Izzo, dans un secteur dense du Panier. La mini-carte et le nom de rue proche utilisent le meme extrait. Les accessoires destructibles, l'avatar, les effets et la police restent des elements fictifs et arcade.
 
 ## Jouer localement
 
@@ -23,7 +23,7 @@ npm run preview
 
 ## Commandes
 
-- **ZQSD ou WASD** : se deplacer; **Maj** : sprinter.
+- **ZQSD, WASD ou fleches directionnelles** : se deplacer; **Maj** : sprinter.
 - **Souris maintenue et glissee sur la scene** : orienter la camera; molette : zoom.
 - **Espace** : sauter.
 - **E** ou **clic gauche sur la scene** : impulsion arcade qui projette les accessoires fictifs a proximite.
